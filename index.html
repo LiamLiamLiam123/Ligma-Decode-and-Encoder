@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ligma Decode and Encoder</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f9f9f9;
+      color: #333;
+    }
+    header {
+      background-color: #4CAF50;
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+    h1, h2 {
+      margin: 0;
+    }
+    .container {
+      margin: auto;
+      padding: 20px;
+      max-width: 900px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin-top: 20px;
+      margin-bottom: 80px;
+    }
+    label {
+      font-weight: bold;
+      margin-top: 12px;
+      display: block;
+    }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 10px;
+      margin-top: 8px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      resize: vertical;
+      font-family: monospace;
+    }
+    input[type=password] {
+      padding: 8px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    button {
+      padding: 10px 16px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    button.secondary {
+      background-color: #333;
+    }
+    button.secondary:hover {
+      background-color: #555;
+    }
+    .hint {
+      font-size: 13px;
+      color: #555;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+    footer {
+      background-color: #4CAF50;
+      color: white;
+      text-align: center;
+      padding: 12px;
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ligma Decode and Encoder</h1>
+  </header>
+  <div class="container">
+    <h2>Encode, Decode, Encrypt, Decrypt</h2>
+    <label for="input">Input</label>
+    <textarea id="input" placeholder="Type or paste text here...">Hello world</textarea>
+
+    <div class="row">
+      <button id="b64-encode">Base64 Encode</button>
+      <button id="b64-decode" class="secondary">Base64 Decode</button>
+    </div>
+
+    <div class="row">
+      <input id="password" type="password" placeholder="Password (AES)">
+      <button id="encrypt">Encrypt (AES → Base64)</button>
+      <button id="decrypt" class="secondary">Decrypt (Base64 → AES)</button>
+    </div>
+
+    <label for="output">Output</label>
+    <textarea id="output" placeholder="Result will appear here..." readonly></textarea>
+
+    <div class="row">
+      <button id="copy-output" class="secondary">Copy Output</button>
+      <button id="clear" class="secondary">Clear</button>
+    </div>
+
+    <div class="hint">
+      <ul>
+        <li>Base64 works directly on text (UTF-8).</li>
+        <li>AES-GCM encryption derives a key from your password with PBKDF2 (100,000 iterations).</li>
+        <li>Encrypted data = Base64(salt(16) + iv(12) + ciphertext).</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    <p>&copy; 2024 Ligma Decode and Encoder — Liam Stephenson. MIT</p>
+  </footer>
+
+<script>
+/* Helpers for ArrayBuffer <-> Base64 / string conversions */
+function strToArrayBuffer(str) {
+  return new TextEncoder().encode(str).buffer;
+}
+function arrayBufferToStr(ab) {
+  return new TextDecoder().decode(new Uint8Array(ab));
+}
+function abToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+function base64ToAb(base64) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+function base64EncodeText(text) {
+  const ab = strToArrayBuffer(text);
+  return abToBase64(ab);
+}
+function base64DecodeText(b64) {
+  try {
+    const ab = base64ToAb(b64);
+    return arrayBufferToStr(ab);
+  } catch (e) {
+    throw new Error('Invalid Base64 or non-text bytes.');
+  }
+}
+async function deriveKeyFromPassword(password, salt) {
+  const pwKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  );
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    pwKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt','decrypt']
+  );
+  return key;
+}
+function randomBytes(length) {
+  const b = new Uint8Array(length);
+  crypto.getRandomValues(b);
+  return b;
+}
+async function encryptWithPassword(plaintext, password) {
+  if (!password) throw new Error('Password required for encryption.');
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const key = await deriveKeyFromPassword(password, salt);
+  const encoded = new TextEncoder().encode(plaintext);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  const saltIvCipher = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+  saltIvCipher.set(salt, 0);
+  saltIvCipher.set(iv, salt.length);
+  saltIvCipher.set(new Uint8Array(ciphertext), salt.length + iv.length);
+  return abToBase64(saltIvCipher.buffer);
+}
+async function decryptWithPassword(b64, password) {
+  if (!password) throw new Error('Password required for decryption.');
+  const combined = new Uint8Array(base64ToAb(b64));
+  if (combined.length < 28) throw new Error('Invalid encrypted data.');
+  const salt = combined.slice(0, 16).buffer;
+  const iv = combined.slice(16, 28).buffer;
+  const ciphertext = combined.slice(28).buffer;
+  const key = await deriveKeyFromPassword(password, salt);
+  try {
+    const plainbuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, key, ciphertext);
+    return arrayBufferToStr(plainbuf);
+  } catch {
+    throw new Error('Decryption failed — wrong password or corrupted data.');
+  }
+}
+/* UI */
+const inputEl = document.getElementById('input');
+const outputEl = document.getElementById('output');
+const passwordEl = document.getElementById('password');
+document.getElementById('b64-encode').addEventListener('click', () => {
+  try { outputEl.value = base64EncodeText(inputEl.value); }
+  catch (e) { outputEl.value = 'Error: ' + e.message; }
+});
+document.getElementById('b64-decode').addEventListener('click', () => {
+  try { outputEl.value = base64DecodeText(inputEl.value); }
+  catch (e) { outputEl.value = 'Error: ' + e.message; }
+});
+document.getElementById('encrypt').addEventListener('click', async () => {
+  try { outputEl.value = await encryptWithPassword(inputEl.value, passwordEl.value); }
+  catch (e) { outputEl.value = 'Error: ' + e.message; }
+});
+document.getElementById('decrypt').addEventListener('click', async () => {
+  try { outputEl.value = await decryptWithPassword(inputEl.value, passwordEl.value); }
+  catch (e) { outputEl.value = 'Error: ' + e.message; }
+});
+document.getElementById('copy-output').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(outputEl.value); alert('Copied!'); }
+  catch (e) { alert('Copy failed: ' + e.message); }
+});
+document.getElementById('clear').addEventListener('click', () => {
+  inputEl.value = ''; outputEl.value = ''; passwordEl.value = '';
+});
+</script>
+</body>
+</html>
