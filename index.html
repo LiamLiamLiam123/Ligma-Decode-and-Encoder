@@ -38,7 +38,7 @@
     }
     textarea {
       width: 100%;
-      min-height: 120px;
+      min-height: 100px;
       padding: 10px;
       margin-top: 8px;
       border-radius: 5px;
@@ -98,16 +98,28 @@
   </header>
   <div class="container">
     <h2>Encode, Decode, Encrypt, Decrypt</h2>
-    <label for="input">Input</label>
-    <textarea id="input" placeholder="Type or paste text here...">Hello world</textarea>
+
+    <label for="input">Message</label>
+    <textarea id="input" placeholder="Type your message here...">Hello world</textarea>
 
     <div class="row">
       <button id="b64-encode">Base64 Encode</button>
       <button id="b64-decode" class="secondary">Base64 Decode</button>
     </div>
 
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="Password (AES)">
+
+    <label><input type="checkbox" id="dual-mode"> Enable Dual Message Mode</label>
+
+    <div id="dual-fields" style="display:none; margin-top:10px;">
+      <label for="input2">Second Message</label>
+      <textarea id="input2" placeholder="Second hidden message..."></textarea>
+      <label for="password2">Second Password</label>
+      <input id="password2" type="password" placeholder="Second password (AES)">
+    </div>
+
     <div class="row">
-      <input id="password" type="password" placeholder="Password (AES)">
       <button id="encrypt">Encrypt (AES → Base64)</button>
       <button id="decrypt" class="secondary">Decrypt (Base64 → AES)</button>
     </div>
@@ -124,7 +136,7 @@
       <ul>
         <li>Base64 works directly on text (UTF-8).</li>
         <li>AES-GCM encryption derives a key from your password with PBKDF2 (100,000 iterations).</li>
-        <li>Encrypted data = Base64(salt(16) + iv(12) + ciphertext).</li>
+        <li>Dual message mode lets you encrypt <b>two different messages</b> with <b>two different passwords</b> into one code.</li>
       </ul>
     </div>
   </div>
@@ -134,7 +146,7 @@
   </footer>
 
 <script>
-/* Helpers for ArrayBuffer <-> Base64 / string conversions */
+/* Helpers */
 function strToArrayBuffer(str) {
   return new TextEncoder().encode(str).buffer;
 }
@@ -169,6 +181,7 @@ function base64DecodeText(b64) {
     throw new Error('Invalid Base64 or non-text bytes.');
   }
 }
+/* AES crypto */
 async function deriveKeyFromPassword(password, salt) {
   const pwKey = await crypto.subtle.importKey(
     'raw',
@@ -178,12 +191,7 @@ async function deriveKeyFromPassword(password, salt) {
     ['deriveKey']
   );
   const key = await crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt,
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
     pwKey,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -226,8 +234,17 @@ async function decryptWithPassword(b64, password) {
 }
 /* UI */
 const inputEl = document.getElementById('input');
+const input2El = document.getElementById('input2');
 const outputEl = document.getElementById('output');
 const passwordEl = document.getElementById('password');
+const password2El = document.getElementById('password2');
+const dualModeEl = document.getElementById('dual-mode');
+const dualFieldsEl = document.getElementById('dual-fields');
+
+dualModeEl.addEventListener('change', () => {
+  dualFieldsEl.style.display = dualModeEl.checked ? 'block' : 'none';
+});
+
 document.getElementById('b64-encode').addEventListener('click', () => {
   try { outputEl.value = base64EncodeText(inputEl.value); }
   catch (e) { outputEl.value = 'Error: ' + e.message; }
@@ -236,20 +253,52 @@ document.getElementById('b64-decode').addEventListener('click', () => {
   try { outputEl.value = base64DecodeText(inputEl.value); }
   catch (e) { outputEl.value = 'Error: ' + e.message; }
 });
+
 document.getElementById('encrypt').addEventListener('click', async () => {
-  try { outputEl.value = await encryptWithPassword(inputEl.value, passwordEl.value); }
-  catch (e) { outputEl.value = 'Error: ' + e.message; }
+  try {
+    if (dualModeEl.checked) {
+      const enc1 = await encryptWithPassword(inputEl.value, passwordEl.value);
+      const enc2 = await encryptWithPassword(input2El.value, password2El.value);
+      const combined = JSON.stringify({m1: enc1, m2: enc2});
+      outputEl.value = abToBase64(new TextEncoder().encode(combined));
+    } else {
+      outputEl.value = await encryptWithPassword(inputEl.value, passwordEl.value);
+    }
+  } catch (e) {
+    outputEl.value = 'Error: ' + e.message;
+  }
 });
+
 document.getElementById('decrypt').addEventListener('click', async () => {
-  try { outputEl.value = await decryptWithPassword(inputEl.value, passwordEl.value); }
-  catch (e) { outputEl.value = 'Error: ' + e.message; }
+  try {
+    const pwd = passwordEl.value;
+    let decoded;
+    try {
+      decoded = JSON.parse(arrayBufferToStr(base64ToAb(inputEl.value)));
+    } catch {
+      decoded = null;
+    }
+    if (decoded && decoded.m1 && decoded.m2) {
+      try {
+        outputEl.value = await decryptWithPassword(decoded.m1, pwd);
+      } catch {
+        outputEl.value = await decryptWithPassword(decoded.m2, pwd);
+      }
+    } else {
+      outputEl.value = await decryptWithPassword(inputEl.value, pwd);
+    }
+  } catch (e) {
+    outputEl.value = 'Error: ' + e.message;
+  }
 });
+
 document.getElementById('copy-output').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(outputEl.value); alert('Copied!'); }
   catch (e) { alert('Copy failed: ' + e.message); }
 });
 document.getElementById('clear').addEventListener('click', () => {
-  inputEl.value = ''; outputEl.value = ''; passwordEl.value = '';
+  inputEl.value = ''; input2El.value = ''; outputEl.value = '';
+  passwordEl.value = ''; password2El.value = '';
 });
 </script>
 </body>
